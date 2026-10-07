@@ -1,13 +1,14 @@
-"""Fail-closed codec for CamoKey.
+"""Fail-closed CamoKey codec.
 
-Inner code is a pure-Python erasure code: each payload byte is repeated R times
-and a CRC32 trailer binds the message. Symbols are interleaved so local fabric
-damage becomes scattered erasures. An optional reedsolo path is used when the
-package is installed; the repetition+CRC path is the tested baseline and already
-meets the 60%-remaining recovery claim with R=3 (majority of any 2-of-3).
+The payload is a polynomial over GF(256). Each tile stores one evaluation.
+Any k of the n evaluations interpolate the polynomial, and n is chosen so
+k / n <= 0.55. Therefore any observation that still has 60% of the tiles
+(erasures marked) reconstructs the same bytes. A CRC32 plus an HMAC tag
+bound to the secret reject tampered symbols: the decoder returns the secret
+or None, never a different key.
 
-Acceptance rule: recovered secret is returned only if pattern_id and HMAC tag
-recompute exactly. Otherwise None.
+GF(256) has 255 nonzero evaluation points, so one codeword covers secrets
+up to 96 bytes. Stretch a passphrase down to this size before calling encode.
 """
 
 from __future__ import annotations
@@ -21,7 +22,63 @@ from typing import Optional
 VERSION = 1
 PATTERN_ID_LEN = 8
 TAG_LEN = 16
-REPEAT = 3  # majority vote; any 2 of 3 copies recover a byte
+RATE = 0.55
+
+_EXP = [0] * 512
+_LOG = [0] * 256
+_x = 1
+for _i in range(255):
+    _EXP[_i] = _x
+    _LOG[_x] = _i
+    _x <<= 1
+    if _x & 0x100:
+        _x ^= 0x11D
+for _i in range(255, 512):
+    _EXP[_i] = _EXP[_i - 255]
+
+
+def _mul(a: int, b: int) -> int:
+    if a == 0 or b == 0:
+        return 0
+    return _EXP[_LOG[a] + _LOG[b]]
+
+
+def _div(a: int, b: int) -> int:
+    if b == 0:
+        raise ZeroDivisionError
+    if a == 0:
+        return 0
+    return _EXP[(_LOG[a] - _LOG[b]) % 255]
+
+
+def _eval(coeffs: list[int], xv: int) -> int:
+    y = 0
+    xp = 1
+    for c in coeffs:
+        y ^= _mul(c, xp)
+        xp = _mul(xp, xv)
+    return y
+
+
+def _interpolate(xs: list[int], ys: list[int]) -> list[int]:
+    k = len(xs)
+    coeffs = [0] * k
+    for j, xj in enumerate(xs):
+        num = [1]
+        den = 1
+        for m, xm in enumerate(xs):
+            if m == j:
+                continue
+            new = [0] * (len(num) + 1)
+            for i, c in enumerate(num):
+                new[i] ^= _mul(c, xm)
+                new[i + 1] ^= c
+            num = new
+            den = _mul(den, xj ^ xm)
+        scale = _mul(ys[j], _div(1, den))
+        for i, c in enumerate(num):
+            coeffs[i] ^= _mul(c, scale)
+    return coeffs
 
 
 def _hmac(key: bytes, msg: bytes) -> bytes:
@@ -42,8 +99,8 @@ def derive_aes_key(secret: bytes, pattern_id: Optional[bytes] = None) -> bytes:
 
 
 def build_message(secret: bytes) -> bytes:
-    if not 1 <= len(secret) <= 128:
-        raise ValueError("secret length must be 1..128 bytes (8..1024 bits)")
+    if not 1 <= len(secret) <= 96:
+        raise ValueError("secret length must be 1..96 bytes so the codeword fits in GF(256)")
     pid = pattern_id_for(secret)
     tag = _hmac(secret, pid + b"camokey-bind-v1")[:TAG_LEN]
     return struct.pack(">BB", VERSION, len(secret)) + pid + secret + tag
@@ -69,21 +126,23 @@ def _split_message(msg: bytes) -> Optional[bytes]:
     return secret
 
 
+def _codeword_len(k: int) -> int:
+    n = int(k / RATE) + 1
+    if n > 255:
+        raise ValueError("payload too long for one GF(256) codeword")
+    while int(n * 0.60) < k:
+        n += 1
+        if n > 255:
+            raise ValueError("payload too long for one GF(256) codeword")
+    return n
+
+
 def encode_symbols(secret: bytes) -> list[int]:
-    """Return interleaved repeated payload bytes plus CRC. Values 0..255."""
     msg = build_message(secret)
     crc = zlib.crc32(msg) & 0xFFFFFFFF
-    body = msg + struct.pack(">I", crc)
-    repeated = []
-    for b in body:
-        repeated.extend([b] * REPEAT)
-    # space-filling interleave: stride by a coprime step so neighbors are far apart
-    n = len(repeated)
-    step = 17 if n % 17 else 13
-    out = [0] * n
-    for i, sym in enumerate(repeated):
-        out[(i * step) % n] = sym
-    return out
+    body = list(msg + struct.pack(">I", crc))
+    n = _codeword_len(len(body))
+    return [_eval(body, _EXP[i]) for i in range(n)]
 
 
 def encode_secret(secret: bytes) -> dict:
@@ -94,38 +153,39 @@ def encode_secret(secret: bytes) -> dict:
         "symbols": symbols,
         "aes_key": derive_aes_key(secret, pid).hex(),
         "complexity_bits": len(secret) * 8,
-        "repeat": REPEAT,
+        "k_over_n": round(RATE, 2),
     }
 
 
 def decode_symbols(observed: list[Optional[int]]) -> Optional[bytes]:
     """observed[i] is a symbol 0..255 or None (erasure). Returns secret or None."""
     n = len(observed)
-    if n == 0 or n % REPEAT != 0:
-        # allow trailing classification misses only if length matches an encode
+    if n == 0 or n > 255:
         return None
-    step = 17 if n % 17 else 13
-    repeated: list[Optional[int]] = [None] * n
-    for i in range(n):
-        repeated[(i * step) % n] = observed[i]
-    # inverse of the placement above: we wrote out[(i*step)%n] = repeated_linear[i]
-    # so linear[i] = out[(i*step)%n], which is what we just stored in `repeated`.
-    body_len = n // REPEAT
-    recovered = bytearray()
-    for i in range(body_len):
-        votes = [repeated[i * REPEAT + r] for r in range(REPEAT)]
-        present = [v for v in votes if v is not None]
-        if len(present) < 2:
-            return None  # not enough copies; fail closed
-        # majority; tie or disagreement without a majority -> erasure fail
-        best = max(set(present), key=present.count)
-        if present.count(best) < 2:
+    present = [i for i, v in enumerate(observed) if v is not None]
+    k = int(n * RATE)
+    if len(present) < k:
+        return None
+    xs = [_EXP[i] for i in present[:k]]
+    ys = [int(observed[i]) for i in present[:k]]
+    try:
+        coeffs = _interpolate(xs, ys)
+    except ZeroDivisionError:
+        return None
+    if len(coeffs) < 4:
+        return None
+    raw = bytes(c & 0xFF for c in coeffs)
+    msg, crc_bytes = raw[:-4], raw[-4:]
+    crc = struct.unpack(">I", crc_bytes)[0]
+    if (zlib.crc32(msg) & 0xFFFFFFFF) != crc:
+        return None
+    secret = _split_message(msg)
+    if secret is None:
+        return None
+    expect = encode_symbols(secret)
+    if len(expect) != n:
+        return None
+    for i, v in enumerate(observed):
+        if v is not None and v != expect[i]:
             return None
-        recovered.append(best)
-    if len(recovered) < 4:
-        return None
-    msg, crc_bytes = recovered[:-4], recovered[-4:]
-    crc = struct.unpack(">I", bytes(crc_bytes))[0]
-    if (zlib.crc32(bytes(msg)) & 0xFFFFFFFF) != crc:
-        return None
-    return _split_message(bytes(msg))
+    return secret
