@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "camokey"
+version = "0.1.0"
+description = "Deterministic camo patterns that recover a tamper-evident key from a damaged fabric sample"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Max Infeld" }]
+dependencies = [
+  "numpy>=1.26",
+  "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+cv = ["opencv-python>=4.8"]
+rs = ["reedsolo>=1.7"]
+
+[project.scripts]
+camokey-generate = "camokey.generate:main"
+camokey-detect = "camokey.detect:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
