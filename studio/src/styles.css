@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: Tahoma, "MS Sans Serif", "Segoe UI", sans-serif;
+  --font-sans: Tahoma, "MS Sans Serif", "Segoe UI", sans-serif;
+  --color-ink: #c0c0c0;
+  --color-bone: #000000;
+  --color-sand: #000080;
+  --color-moss: #008000;
+  --color-panel: #c0c0c0;
+  --color-line: #808080;
+  --color-muted: #404040;
+  --color-danger: #800000;
+  --radius-card: 0px;
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #008080;
+    color: #000;
+    font-family: Tahoma, "MS Sans Serif", "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.35;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 1px dotted #000;
+    outline-offset: -3px;
+  }
+}
+
+@layer components {
+  .btn,
+  .btn-primary,
+  .btn-quiet {
+    min-height: 2.25rem;
+    border-radius: 0;
+    border: none;
+    padding: 0.35rem 0.7rem;
+    font: inherit;
+    font-size: 0.95rem;
+    color: #000;
+    background: #c0c0c0;
+    box-shadow:
+      inset -1px -1px 0 #000,
+      inset 1px 1px 0 #fff,
+      inset -2px -2px 0 #808080,
+      inset 2px 2px 0 #dfdfdf;
+  }
+  .btn-primary {
+    font-weight: 700;
+    outline: 1px solid #000;
+    outline-offset: 2px;
+  }
+  .btn-quiet {
+    font-weight: 400;
+  }
+  .btn:active,
+  .btn-primary:active,
+  .btn-quiet:active {
+    box-shadow:
+      inset 1px 1px 0 #000,
+      inset -1px -1px 0 #fff,
+      inset 2px 2px 0 #808080,
+      inset -2px -2px 0 #dfdfdf;
+  }
+  .btn:disabled {
+    color: #808080;
+    text-shadow: 1px 1px 0 #fff;
+  }
+  .field {
+    display: block;
+    width: 100%;
+    min-height: 2.25rem;
+    margin-top: 0.25rem;
+    border-radius: 0;
+    border: none;
+    background: #fff;
+    color: #000;
+    padding: 0.35rem 0.5rem;
+    font: inherit;
+    font-size: 1rem;
+    box-shadow:
+      inset -1px -1px 0 #fff,
+      inset 1px 1px 0 #808080,
+      inset 2px 2px 0 #000;
+  }
+  .taskbar {
+    background: #c0c0c0;
+    color: #000;
+    box-shadow: inset 0 2px 0 #fff;
+  }
+  .win {
+    background: #c0c0c0;
+    color: #000;
+    border-radius: 0;
+    box-shadow:
+      inset -1px -1px 0 #000,
+      inset 1px 1px 0 #fff,
+      inset -2px -2px 0 #808080,
+      inset 2px 2px 0 #dfdfdf;
+  }
+  .win-in {
+    background: #fff;
+    color: #000;
+    box-shadow:
+      inset -1px -1px 0 #fff,
+      inset 1px 1px 0 #808080,
+      inset 2px 2px 0 #000;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
