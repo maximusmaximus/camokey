@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CamoKey</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="camo" aria-hidden="true"></canvas>
+  <header class="bar">
+    <p class="brand">CamoKey</p>
+    <p class="creator" id="creator">Creator ----...----</p>
+    <div class="actions">
+      <button type="button" id="random" class="btn">Random</button>
+      <button type="button" id="color" class="btn">Color</button>
+      <button type="button" id="use" class="btn primary">Use this</button>
+      <button type="button" id="info" class="btn icon" aria-label="Open the walkthrough">i</button>
+    </div>
+  </header>
+  <div id="live" class="live" aria-live="polite"></div>
+
+  <dialog id="tour" aria-labelledby="tour-title">
+    <h2 id="tour-title">How this works</h2>
+    <p id="tour-text"></p>
+    <div class="row">
+      <button type="button" id="tour-skip" class="btn">Skip</button>
+      <button type="button" id="tour-next" class="btn primary">Next</button>
+    </div>
+  </dialog>
+
+  <dialog id="color-dialog" aria-labelledby="color-title">
+    <h2 id="color-title">Color</h2>
+    <div id="presets" class="presets"></div>
+    <label>Wheel <input id="wheel" type="color" value="#5c6b3a"></label>
+    <label>C <input id="c" type="range" min="0" max="100" value="40"></label>
+    <label>M <input id="m" type="range" min="0" max="100" value="20"></label>
+    <label>Y <input id="y" type="range" min="0" max="100" value="50"></label>
+    <label>K <input id="k" type="range" min="0" max="100" value="30"></label>
+    <button type="button" id="color-done" class="btn primary">Done</button>
+  </dialog>
+
+  <dialog id="use-dialog" aria-labelledby="use-title">
+    <h2 id="use-title">Use this pattern</h2>
+    <p id="phrase-warn">This phrase is shown once. A lost phrase cannot be recovered.</p>
+    <p id="phrase" class="phrase"></p>
+    <label>Do you already have a phrase?
+      <input id="have-phrase" type="text" autocomplete="off" placeholder="Paste it, or leave blank to use this one">
+    </label>
+    <label>Type the first 4 letters of the phrase to confirm
+      <input id="confirm-phrase" type="text" autocomplete="off" maxlength="8">
+    </label>
+    <label>Set name <input id="set-name" value="spring drop"></label>
+    <label>How many <input id="count" type="number" min="1" max="24" value="4"></label>
+    <label>Email for the manifest, optional <input id="email" type="email"></label>
+    <div id="serials"></div>
+    <div class="row">
+      <button type="button" id="export-png" class="btn">PNG</button>
+      <button type="button" id="export-pdf" class="btn">PDF</button>
+      <button type="button" id="export-json" class="btn">Manifest</button>
+      <button type="button" id="use-close" class="btn">Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="bug" aria-labelledby="bug-title">
+    <h2 id="bug-title">Send a bug</h2>
+    <p id="bug-what"></p>
+    <label>What were you trying to do? <input id="bug-text"></label>
+    <label>What is 3 + 4? <input id="captcha" inputmode="numeric"></label>
+    <button type="button" id="bug-send" class="btn primary">Open GitHub issue</button>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
