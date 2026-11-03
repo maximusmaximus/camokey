@@ -1,11 +1,11 @@
 import { IDEAL_TILE, clothRepeats, drawCamo, patternId, readCanvas } from "./camo";
 
-// Last sweep (1280×800 woodland, 3 trials):
-// repeat 320px, 4 across by 2 down.
-// All trials passed at 5% cover. Every trial failed at 30% cover.
+// Last sweep after flowing blots (1280×800 woodland, 3 trials):
+// repeat 320px, 4 across by 2 down. Clean scan passed.
+// All 3 trials still scanned at 25% cover. Every trial failed at 30% cover.
 // One tuck fails. Center crop works at 70% of the frame, not at 55%.
-// Zoom works at 0.75×, 1.4×, and 1.8×, not at 0.55×.
-// A 2px wave inside the repeat fails. An 8° tilt still scans.
+// Zoom works at 0.55×, 0.75×, 1.4×, and 1.8×.
+// A 2px wave still scans. 4px fails. An 8° tilt still scans.
 
 const COLORS = ["#223020", "#3e4e2a", "#605836", "#1c1e18", "#766c48"];
 

@@ -1,6 +1,6 @@
 export const NOTICE_LIMIT = 1024;
 
-export type Notice = { title: string; age: string; body: string };
+export type Notice = { title: string; body: string };
 
 export function noticeBytes(notice: Notice) {
   return new TextEncoder().encode(JSON.stringify(notice)).length;

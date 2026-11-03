@@ -1,3 +1,5 @@
+import { WORDS } from "./words";
+
 export const PRESETS = [
   { name: "Woodland", colors: ["#223020", "#3e4e2a", "#605836", "#1c1e18", "#766c48"] },
   { name: "Urban", colors: ["#303432", "#585c56", "#202220", "#807e76", "#161816"] },
@@ -11,12 +13,7 @@ export const PRESETS = [
   { name: "Marsh", colors: ["#3c4630", "#6a6840", "#245058", "#2a261c", "#98a070"] },
 ] as const;
 
-const WORDS =
-  "abandon ability able about above absent absorb abstract absurd abuse access accident account accuse achieve acid acoustic acquire across act action actor actual adapt add address adjust admit adult advance advice aerobic affair afford afraid again age agent agree ahead aim air airport aisle alarm album alcohol alert alien all allow almost alone alpha already also alter always amateur amazing among amount amused analyst anchor ancient anger angle angry animal ankle announce annual another answer antenna antique anxiety any apart apology appear apple approve april arch arctic area arena argue arm armed armor army around arrange arrest arrive arrow art artist artwork ask aspect assault asset assist assume asthma athlete atom attack attend attitude attract auction audit august aunt author auto autumn average avocado avoid awake aware away awesome awful awkward axis".split(
-    " ",
-  );
-
-const WORD_SET = new Set(WORDS);
+const WORD_SET = new Set<string>(WORDS);
 
 export function isMnemonicWord(word: string) {
   return WORD_SET.has(word.trim().toLowerCase());
@@ -25,17 +22,9 @@ export function isMnemonicWord(word: string) {
 export type Visibility = "public" | "private" | "unlisted";
 
 export function randomMnemonic() {
-  const used = new Set<string>();
-  const picks: string[] = [];
   const buf = new Uint32Array(12);
   crypto.getRandomValues(buf);
-  for (const n of buf) {
-    let i = n % WORDS.length;
-    while (used.has(WORDS[i]!)) i = (i + 1) % WORDS.length;
-    used.add(WORDS[i]!);
-    picks.push(WORDS[i]!);
-  }
-  return picks.join(" ");
+  return [...buf].map((n) => WORDS[n % WORDS.length]!).join(" ");
 }
 
 export async function sha256Hex(text: string) {
@@ -160,7 +149,7 @@ function serialSeed(bytes: Uint8Array) {
   return h >>> 0;
 }
 
-function blot(
+function organic(
   ctx: CanvasRenderingContext2D,
   tile: number,
   cx: number,
@@ -170,21 +159,45 @@ function blot(
   turn: number,
   color: [number, number, number],
   alpha: number,
+  wobble: readonly number[],
 ) {
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.fillStyle = rgb(color);
   ctx.beginPath();
+  const n = wobble.length;
+  const cs = Math.cos(turn);
+  const sn = Math.sin(turn);
+  const reach = Math.max(rx, ry) * 1.35;
   for (const ox of [-tile, 0, tile]) {
     for (const oy of [-tile, 0, tile]) {
       const x = cx + ox;
       const y = cy + oy;
-      if (x > tile + rx || y > tile + ry || x < -rx || y < -ry) continue;
-      ctx.ellipse(x, y, Math.max(1, rx), Math.max(1, ry), turn, 0, Math.PI * 2);
+      if (x > tile + reach || y > tile + reach || x < -reach || y < -reach) continue;
+      const pts: Array<[number, number]> = [];
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const px = Math.cos(a) * rx * wobble[i]!;
+        const py = Math.sin(a) * ry * wobble[i]!;
+        pts.push([x + px * cs - py * sn, y + px * sn + py * cs]);
+      }
+      const last = pts[n - 1]!;
+      const first = pts[0]!;
+      ctx.moveTo((last[0]! + first[0]!) / 2, (last[1]! + first[1]!) / 2);
+      for (let i = 0; i < n; i++) {
+        const p = pts[i]!;
+        const q = pts[(i + 1) % n]!;
+        ctx.quadraticCurveTo(p[0]!, p[1]!, (p[0]! + q[0]!) / 2, (p[1]! + q[1]!) / 2);
+      }
+      ctx.closePath();
     }
   }
   ctx.fill();
   ctx.restore();
+}
+
+function sway(rand: () => number, n: number, lo: number, hi: number) {
+  return Array.from({ length: n }, () => lo + rand() * (hi - lo));
 }
 
 function cellNorm(i: number): [number, number] {
@@ -233,26 +246,35 @@ function drawTile(
   const dye = () => pal[Math.floor(rand() * pal.length)]!;
   ctx.globalAlpha = 1;
   ctx.fillStyle = rgb(dye());
-  ctx.fillRect(0, 0, tile, tile);
-  for (let n = 0; n < 6; n++) {
+  ctx.fillRect(-tile, -tile, tile * 3, tile * 3);
+  for (let n = 0; n < 4; n++) {
     const color = dye();
-    const r = tile * (0.12 + rand() * 0.14);
-    blot(ctx, tile, rand() * tile, rand() * tile, r, r * (0.55 + rand() * 0.35), rand() * Math.PI, color, 0.92);
-    blot(
+    let x = rand() * tile;
+    let y = rand() * tile;
+    let ang = rand() * Math.PI * 2;
+    const steps = 5 + Math.floor(rand() * 3);
+    for (let s = 0; s < steps; s++) {
+      ang += (rand() - 0.45) * 1.5;
+      x = (x + Math.cos(ang) * tile * (0.1 + rand() * 0.06) + tile) % tile;
+      y = (y + Math.sin(ang) * tile * (0.1 + rand() * 0.06) + tile) % tile;
+      const r = tile * (0.08 + rand() * 0.07);
+      organic(ctx, tile, x, y, r, r * (0.86 + rand() * 0.14), ang, color, 0.92, sway(rand, 12, 0.78, 1.16));
+    }
+  }
+  for (let n = 0; n < 6; n++) {
+    const r = tile * (0.045 + rand() * 0.04);
+    organic(
       ctx,
       tile,
       rand() * tile,
       rand() * tile,
-      r * 0.62,
-      r * (0.4 + rand() * 0.2),
+      r,
+      r * (0.8 + rand() * 0.2),
       rand() * Math.PI,
       dye(),
-      0.8,
+      0.88,
+      sway(rand, 10, 0.8, 1.15),
     );
-  }
-  for (let n = 0; n < 8; n++) {
-    const r = tile * (0.05 + rand() * 0.06);
-    blot(ctx, tile, rand() * tile, rand() * tile, r, r * (0.6 + rand() * 0.4), rand() * Math.PI, dye(), 0.88);
   }
   const bits = patternBits(bytes);
   const cell = Math.min(tile / COLS, tile / ROWS);
@@ -260,22 +282,23 @@ function drawTile(
     const bit = bits[i]!;
     const [nx, ny] = CELL_POS[i]!;
     const j = mulberry(0xb10b + i * 17);
-    const rad = (bit ? 0.33 : 0.18) * cell * (0.75 + j() * 0.5);
-    const turn = j() * Math.PI;
+    const rad = (bit ? 0.34 : 0.2) * cell * (0.92 + j() * 0.16);
+    const turn = j() * 0.6;
     const color = bit ? ink : wash;
     const cx = nx * tile;
     const cy = ny * tile;
-    blot(ctx, tile, cx, cy, rad * (0.85 + j() * 0.4), rad * (0.45 + j() * 0.35), turn, color, 1);
-    blot(
+    organic(ctx, tile, cx, cy, rad, rad * (0.9 + j() * 0.1), turn, color, 1, sway(j, 6, 0.9, 1.08));
+    organic(
       ctx,
       tile,
-      cx + (j() - 0.5) * rad * 0.4,
-      cy + (j() - 0.5) * rad * 0.4,
-      rad * 0.55,
-      rad * 0.34,
-      turn + 0.8,
+      cx + (j() - 0.5) * rad * 0.25,
+      cy + (j() - 0.5) * rad * 0.25,
+      rad * 0.62,
+      rad * 0.56,
+      turn + 0.4,
       color,
-      0.82,
+      0.9,
+      sway(j, 6, 0.88, 1.1),
     );
   }
 }
@@ -288,12 +311,20 @@ export function drawCamo(
   colors: readonly string[],
 ) {
   const tile = clothTile(w, h);
+  const bleed = Math.ceil(tile * 0.45);
+  const big = document.createElement("canvas");
+  big.width = tile + bleed * 2;
+  big.height = tile + bleed * 2;
+  const bctx = big.getContext("2d");
+  if (!bctx) return;
+  bctx.translate(bleed, bleed);
+  drawTile(bctx, tile, bytes, colors);
   const off = document.createElement("canvas");
   off.width = tile;
   off.height = tile;
   const octx = off.getContext("2d");
   if (!octx) return;
-  drawTile(octx, tile, bytes, colors);
+  octx.drawImage(big, bleed, bleed, tile, tile, 0, 0, tile, tile);
   ctx.globalAlpha = 1;
   for (let y = 0; y < h; y += tile) {
     for (let x = 0; x < w; x += tile) ctx.drawImage(off, x, y);

@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import {
   Check,
   Copy,
   Dices,
   Eye,
   EyeOff,
+  Github,
   Globe,
+  ImageUp,
   Info,
   KeyRound,
   Link2,
@@ -24,7 +26,6 @@ import {
 import {
   PRESETS,
   checkPass,
-  cmykToHex,
   colorLuma,
   drawCamo,
   fingerprint,
@@ -34,6 +35,7 @@ import {
   MIN_LUMA_PERCENT,
   patternId,
   randomMnemonic,
+  readCanvas,
   readPattern,
   renderPng,
   serialBytes,
@@ -54,7 +56,7 @@ type Cloth = {
 const TOUR = {
   en: [
     ["The cloth", "This picture fills the screen. It is a real pattern, not a sample."],
-    ["Random", "Random makes a new one. The code is already in the picture."],
+    ["Random", "Random makes a new key and a new cloth. That key always draws this picture."],
     ["Color", "Color changes the dyes. Pick a set, or mix your own."],
     ["Use this", "Use this keeps the picture you see and lets you make a set."],
     ["Your mnemonic", "You already have a mnemonic. It made this picture. You can paste your own."],
@@ -64,7 +66,7 @@ const TOUR = {
   ],
   es: [
     ["La tela", "Esta imagen llena la pantalla. Es un patrón real, no una muestra."],
-    ["Al azar", "Al azar hace uno nuevo. El código ya está en la imagen."],
+    ["Al azar", "Al azar hace una clave nueva y una tela nueva. Esa clave siempre dibuja esta imagen."],
     ["Color", "Color cambia los tintes. Elige un conjunto o mezcla el tuyo."],
     ["Usar este", "Usar este guarda la imagen que ves y te deja hacer un conjunto."],
     ["Tu mnemónico", "Ya tienes un mnemónico. Él hizo esta imagen. Puedes pegar el tuyo."],
@@ -82,7 +84,7 @@ export function Studio() {
   const [lang, setLang] = useState<Lang>("en");
   const [mnemonic, setMnemonic] = useState("");
   const [index, setIndex] = useState(0);
-  const [history, setHistory] = useState<number[]>([0]);
+  const [history, setHistory] = useState<string[]>([]);
   const [preset, setPreset] = useState(0);
   const [custom, setCustom] = useState<string[] | null>(null);
   const [name, setName] = useState("drop-01");
@@ -95,13 +97,17 @@ export function Studio() {
   const [captcha, setCaptcha] = useState("");
   const [frame, setFrame] = useState(0);
   const [keyCopied, setKeyCopied] = useState(false);
+  const [rollGate, setRollGate] = useState(false);
+  const rolls = useRef<number[]>([]);
 
   const ready = mnemonic.length > 0;
   const es = lang === "es";
   const colors = custom ?? [...PRESETS[preset]!.colors];
 
   useEffect(() => {
-    setMnemonic(randomMnemonic());
+    const first = randomMnemonic();
+    setMnemonic(first);
+    setHistory([first]);
     if (localStorage.getItem("camokey-tour") !== "done") setSheet("tour");
   }, []);
 
@@ -152,23 +158,36 @@ export function Studio() {
     setSheet("none");
   }
 
-  async function roll() {
-    const next = index + 1;
+  function mint() {
+    const next = randomMnemonic();
     setHistory((h) => [...h, next]);
-    setIndex(next);
+    setMnemonic(next);
+    setIndex(0);
+  }
+
+  function roll() {
+    const now = Date.now();
+    rolls.current = rolls.current.filter((t) => now - t < 1000);
+    rolls.current.push(now);
+    if (rolls.current.length > 3) {
+      setRollGate(true);
+      return;
+    }
+    mint();
   }
 
   function back() {
     if (history.length < 2) return;
     const next = history.slice(0, -1);
     setHistory(next);
-    setIndex(next[next.length - 1]!);
+    setMnemonic(next[next.length - 1]!);
+    setIndex(0);
   }
 
   return (
     <main className="relative h-full overflow-hidden bg-ink text-bone">
       <canvas ref={canvasRef} className="fixed inset-0 h-full w-full" aria-hidden="true" />
-      <header className="pointer-events-none fixed inset-x-3 top-3 z-20 flex items-center justify-between">
+      <header className="app-topbar pointer-events-none fixed inset-x-3 z-20 flex items-center justify-between">
         <p className="win pointer-events-auto px-2 py-2 font-display text-xs tracking-wide uppercase md:px-3 md:text-sm">
           CamoKey
         </p>
@@ -201,6 +220,17 @@ export function Studio() {
           <Info className="size-5" aria-hidden="true" />
         </button>
       </header>
+      {sheet === "none" && (
+        <a
+          href="https://github.com/maximusmaximus/camokey"
+          target="_blank"
+          rel="noreferrer"
+          className="win fixed right-2 z-20 inline-flex items-center gap-1 px-2 py-1 text-xs bottom-[calc(9rem+env(safe-area-inset-bottom))] md:right-3 md:bottom-3"
+        >
+          <Github className="size-4" aria-hidden="true" />
+          GitHub
+        </a>
+      )}
       <nav
         aria-label={es ? "Controles" : "Pattern controls"}
         className={
@@ -246,6 +276,9 @@ export function Studio() {
           es={es}
           lang={lang}
           colors={colors}
+          mnemonic={mnemonic}
+          name={name}
+          index={index}
           onLang={() => {
             const next = lang === "en" ? "es" : "en";
             setLang(next);
@@ -270,9 +303,10 @@ export function Studio() {
               say(es ? "El mnemónico necesita 12 palabras de la lista." : "A mnemonic needs 12 words from the list.");
               return;
             }
-            setMnemonic(words.join(" "));
+            const phrase = words.join(" ");
+            setMnemonic(phrase);
             setIndex(0);
-            setHistory([0]);
+            setHistory((h) => [...h, phrase]);
             closeSheet();
           }}
           onClose={closeSheet}
@@ -339,6 +373,20 @@ export function Studio() {
           </div>
         </Sheet>
       )}
+      {rollGate && (
+        <Sheet title={es ? "Demasiado rápido" : "Too fast"} onClose={() => setRollGate(false)}>
+          <p>{es ? "Más de 3 al azar en un segundo. Completa la prueba." : "More than 3 random keys in one second. Finish the check."}</p>
+          <Captcha
+            es={es}
+            onPass={(ok) => {
+              if (!ok) return;
+              rolls.current = [];
+              setRollGate(false);
+              mint();
+            }}
+          />
+        </Sheet>
+      )}
       <button type="button" className="sr-only" onClick={() => setSheet("bug")}>
         Report
       </button>
@@ -386,7 +434,7 @@ function Sheet({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-30 p-8 md:p-16" role="presentation" onMouseDown={onClose}>
+    <div className="sheet-frame fixed inset-0 z-30 px-8 pb-8 md:px-16 md:pb-16" role="presentation" onMouseDown={onClose}>
       <div
         role="dialog"
         aria-modal="true"
@@ -413,6 +461,9 @@ function ColorSheet({
   es,
   lang,
   colors,
+  mnemonic,
+  name,
+  index,
   onLang,
   onPreset,
   onCustom,
@@ -421,27 +472,31 @@ function ColorSheet({
   es: boolean;
   lang: Lang;
   colors: string[];
+  mnemonic: string;
+  name: string;
+  index: number;
   onLang: () => void;
   onPreset: (i: number) => void;
   onCustom: (colors: string[]) => void;
   onClose: () => void;
 }) {
-  const key = colors.join(",");
+  const opened = useRef(colors);
+  const magRef = useRef<HTMLCanvasElement>(null);
+  const wheelRef = useRef<HTMLCanvasElement>(null);
   const [draft, setDraft] = useState(colors);
   const [picked, setPicked] = useState(0);
   const [blocked, setBlocked] = useState("");
-  useEffect(() => {
-    setDraft(key.split(","));
-    setBlocked("");
-  }, [key]);
   const current = draft[picked] ?? "#000000";
-  const [c, m, y, k] = hexToCmyk(current);
-  const span = lumaSpan(draft);
-  const spanPct = (span / 255) * 100;
+  const spanPct = (lumaSpan(draft) / 255) * 100;
   const lumas = draft.map((hex) => colorLuma(hex));
   const darkAt = lumas.indexOf(Math.min(...lumas));
   const lightAt = lumas.indexOf(Math.max(...lumas));
   const need = MIN_LUMA_PERCENT.toFixed(1);
+  const hsv = hexToHsv(current);
+
+  useEffect(() => {
+    if (colors.join(",") !== draft.join(",")) setDraft(colors.slice());
+  }, [colors, draft]);
 
   function tryColor(hex: string) {
     const next = draft.slice();
@@ -451,8 +506,8 @@ function ColorSheet({
       const pct = ((gap / 255) * 100).toFixed(1);
       setBlocked(
         es
-          ? `Demasiado cerca. Eso dejaría ${pct}% de diferencia. Hace falta ${need}%.`
-          : `Too close. That would leave ${pct}% between the darkest and lightest. Keep at least ${need}%.`,
+          ? `Demasiado cerca. Eso dejaría ${pct}%. Hace falta ${need}%.`
+          : `Too close. That would leave ${pct}%. Keep at least ${need}%.`,
       );
       return;
     }
@@ -461,92 +516,213 @@ function ColorSheet({
     onCustom(next);
   }
 
+  function revert() {
+    const next = opened.current.slice();
+    setDraft(next);
+    setBlocked("");
+    onCustom(next);
+  }
+
+  useEffect(() => {
+    const canvas = wheelRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const size = 168;
+    canvas.width = size;
+    canvas.height = size;
+    const r = size / 2;
+    for (let a = 0; a < 360; a += 1) {
+      const start = ((a - 90) * Math.PI) / 180;
+      ctx.beginPath();
+      ctx.moveTo(r, r);
+      ctx.arc(r, r, r - 1, start, start + 0.02);
+      ctx.closePath();
+      ctx.fillStyle = `hsl(${a} 100% 50%)`;
+      ctx.fill();
+    }
+    const fade = ctx.createRadialGradient(r, r, 0, r, r, r);
+    fade.addColorStop(0, "rgba(255,255,255,1)");
+    fade.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = fade;
+    ctx.beginPath();
+    ctx.arc(r, r, r - 1, 0, Math.PI * 2);
+    ctx.fill();
+  }, []);
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const secret = await serialBytes(mnemonic, name, index);
+      if (cancel) return;
+      const canvas = magRef.current;
+      const ctx = canvas?.getContext("2d");
+      if (!canvas || !ctx) return;
+      const big = document.createElement("canvas");
+      big.width = 320;
+      big.height = 320;
+      const bctx = big.getContext("2d");
+      if (!bctx) return;
+      drawCamo(bctx, 320, 320, secret, draft);
+      canvas.width = 180;
+      canvas.height = 180;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(big, 120, 120, 80, 80, 0, 0, 180, 180);
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [mnemonic, name, index, draft]);
+
+  function fromWheel(event: ReactPointerEvent<HTMLCanvasElement>) {
+    const canvas = wheelRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left - rect.width / 2;
+    const y = event.clientY - rect.top - rect.height / 2;
+    const dist = Math.hypot(x, y);
+    if (dist > rect.width / 2) return;
+    let hue = (Math.atan2(y, x) * 180) / Math.PI + 90;
+    if (hue < 0) hue += 360;
+    const sat = Math.min(1, dist / (rect.width / 2));
+    tryColor(hsvToHex(hue, sat, hsv.v));
+  }
+
+  const markX = 50 + Math.cos(((hsv.h - 90) * Math.PI) / 180) * hsv.s * 46;
+  const markY = 50 + Math.sin(((hsv.h - 90) * Math.PI) / 180) * hsv.s * 46;
+
   return (
-    <Sheet title="Color" onClose={onClose}>
-      <p>
-        {es
-          ? "Elige un tinte y cámbialo. La tela se actualiza al momento."
-          : "Pick one dye and change it. The cloth updates as you go."}
-      </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {PRESETS.map((p, i) => (
-          <button
-            key={p.name}
-            type="button"
-            aria-label={p.name}
-            className="size-11 border-2 border-black"
-            style={{ background: p.colors[1] }}
-            onClick={() => onPreset(i)}
-          />
-        ))}
+    <div className="pointer-events-none fixed inset-0 z-30" style={{ paddingTop: "var(--grok-banner-h, 0px)" }}>
+      <div
+        role="dialog"
+        aria-label="Color"
+        className="pointer-events-auto absolute inset-x-2 bottom-2 flex max-h-[68dvh] w-auto flex-col bg-[#c0c0c0] text-black shadow-[inset_-1px_-1px_0_#000,inset_1px_1px_0_#fff,inset_-2px_-2px_0_#808080,inset_2px_2px_0_#dfdfdf] md:inset-x-auto md:right-4 md:bottom-4 md:w-80"
+      >
+        <div className="flex items-center justify-between bg-[#000080] px-2 py-1 text-white">
+          <h2 className="text-base font-bold">{es ? "Color" : "Color"}</h2>
+          <div className="flex gap-1">
+            <button type="button" className="btn min-h-0 px-2 py-0" onClick={revert} aria-label={es ? "Deshacer" : "Undo colors"}>
+              <Undo2 className="size-4" aria-hidden="true" />
+            </button>
+            <button type="button" className="btn min-h-0 px-2 py-0 leading-none" onClick={onClose} aria-label="Close">
+              X
+            </button>
+          </div>
+        </div>
+        <div className="min-h-0 overflow-auto p-3">
+          <p className="text-sm">{es ? "Esta pieza, más grande. El resto de la tela cambia a la vez." : "This piece, larger. The rest of the cloth changes with it."}</p>
+          <canvas ref={magRef} className="win-in mt-2 h-28 w-full object-cover md:h-36" aria-hidden="true" />
+          <div className="mt-2 flex gap-1 overflow-x-auto">
+            {PRESETS.map((p, i) => (
+              <button
+                key={p.name}
+                type="button"
+                aria-label={p.name}
+                title={p.name}
+                className="size-7 shrink-0 border-2 border-black"
+                style={{ background: p.colors[1] }}
+                onClick={() => onPreset(i)}
+              />
+            ))}
+          </div>
+          <div className="mt-2 flex gap-1">
+            {draft.map((hex, i) => (
+              <button
+                key={`${i}-${hex}`}
+                type="button"
+                aria-pressed={picked === i}
+                aria-label={es ? `Tinte ${i + 1}` : `Dye ${i + 1}`}
+                className={`grid h-12 flex-1 place-items-center border-2 text-xs ${picked === i ? "border-[#000080] outline outline-2 outline-[#000080]" : "border-black"}`}
+                style={{ background: hex, color: colorLuma(hex) > 140 ? "#1c1e18" : "#f3efe4" }}
+                onClick={() => {
+                  setPicked(i);
+                  setBlocked("");
+                }}
+              >
+                {picked === i ? (es ? "Este" : "This") : i === darkAt ? (es ? "Osc." : "Dark") : i === lightAt ? (es ? "Claro" : "Light") : i + 1}
+              </button>
+            ))}
+          </div>
+          <div className="relative mx-auto mt-3 w-40">
+            <canvas
+              ref={wheelRef}
+              className="h-40 w-40 touch-none"
+              aria-label={es ? "Rueda de color" : "Color wheel"}
+              onPointerDown={(event) => {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                fromWheel(event);
+              }}
+              onPointerMove={(event) => {
+                if (event.buttons === 1) fromWheel(event);
+              }}
+            />
+            <span
+              className="pointer-events-none absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-black bg-white"
+              style={{ left: `${markX}%`, top: `${markY}%` }}
+            />
+          </div>
+          <label className="mt-2 block text-sm">
+            {es ? "Brillo" : "Brightness"} {Math.round(hsv.v * 100)}
+            <input
+              className="field"
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(hsv.v * 100)}
+              onChange={(event) => tryColor(hsvToHex(hsv.h, hsv.s, Number(event.target.value) / 100))}
+            />
+          </label>
+          <p className="mt-1 text-sm text-muted">
+            {es ? `Brillo entre tintes: ${spanPct.toFixed(1)}%. Hace falta ${need}%.` : `Dye span ${spanPct.toFixed(1)}%. Needs ${need}%.`}
+          </p>
+          {blocked && <p className="mt-1 text-sm text-danger">{blocked}</p>}
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <button type="button" className="btn-quiet" onClick={onLang}>
+              {lang === "en" ? "Español" : "English"}
+            </button>
+            <button type="button" className="btn-primary" onClick={onClose}>
+              {es ? "Poner" : "Set"}
+            </button>
+          </div>
+        </div>
       </div>
-      <div className="mt-4 flex gap-2">
-        {draft.map((hex, i) => (
-          <button
-            key={`${hex}-${i}`}
-            type="button"
-            aria-pressed={picked === i}
-            aria-label={es ? `Tinte ${i + 1}` : `Dye ${i + 1}`}
-            className={`grid h-14 flex-1 place-items-center border-2 text-xs ${picked === i ? "border-sand" : "border-black"}`}
-            style={{ background: hex, color: colorLuma(hex) > 140 ? "#1c1e18" : "#f3efe4" }}
-            onClick={() => {
-              setPicked(i);
-              setBlocked("");
-            }}
-          >
-            {i === darkAt ? (es ? "Oscuro" : "Dark") : i === lightAt ? (es ? "Claro" : "Light") : i + 1}
-          </button>
-        ))}
-      </div>
-      <p className="mt-3 text-sm">
-        {es
-          ? `La diferencia de brillo es ${spanPct.toFixed(1)}%. El escaneo necesita ${need}%.`
-          : `Brightness span is ${spanPct.toFixed(1)}%. The scan needs ${need}%.`}
-      </p>
-      <div className="mt-2 h-2 overflow-hidden bg-line">
-        <div
-          className="h-full bg-moss"
-          style={{ width: `${Math.max(4, Math.min(100, spanPct))}%` }}
-        />
-      </div>
-      {blocked && <p className="mt-2 text-sm text-danger">{blocked}</p>}
-      <label className="mt-4 block">
-        {es ? `Tinte ${picked + 1}` : `Dye ${picked + 1}`}
-        <input className="field h-11" type="color" value={current} onChange={(e) => tryColor(e.target.value)} />
-      </label>
-      <Slider label="C" value={Math.round(c * 100)} onChange={(n) => tryColor(cmykToHex(n / 100, m, y, k))} />
-      <Slider label="M" value={Math.round(m * 100)} onChange={(n) => tryColor(cmykToHex(c, n / 100, y, k))} />
-      <Slider label="Y" value={Math.round(y * 100)} onChange={(n) => tryColor(cmykToHex(c, m, n / 100, k))} />
-      <Slider label="K" value={Math.round(k * 100)} onChange={(n) => tryColor(cmykToHex(c, m, y, n / 100))} />
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
-        <button type="button" className="btn-quiet" onClick={onLang}>
-          {lang === "en" ? "Español" : "English"}
-        </button>
-        <button type="button" className="btn-quiet" onClick={onClose}>
-          {es ? "Cerrar" : "Close"}
-        </button>
-      </div>
-    </Sheet>
+    </div>
   );
 }
 
-function hexToCmyk(hex: string): [number, number, number, number] {
+function hexToHsv(hex: string) {
   const n = parseInt(hex.slice(1), 16);
   const r = ((n >> 16) & 255) / 255;
   const g = ((n >> 8) & 255) / 255;
   const b = (n & 255) / 255;
-  const black = 1 - Math.max(r, g, b);
-  if (black === 1) return [0, 0, 0, 1];
-  return [(1 - r - black) / (1 - black), (1 - g - black) / (1 - black), (1 - b - black) / (1 - black), black];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { h, s: max === 0 ? 0 : d / max, v: max };
 }
 
-function Slider({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
-  return (
-    <label className="mt-2 block text-sm">
-      {label} {value}
-      <input className="field" type="range" min={0} max={100} value={value} onChange={(e) => onChange(Number(e.target.value))} />
-    </label>
-  );
+function hsvToHex(h: number, s: number, v: number) {
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const ch = (n: number) => Math.round((n + m) * 255).toString(16).padStart(2, "0");
+  return `#${ch(r)}${ch(g)}${ch(b)}`;
 }
 
 function WordsSheet({
@@ -719,7 +895,6 @@ function UseSheet({
   const [copied, setCopied] = useState(false);
   const [shown, setShown] = useState(false);
   const [title, setTitle] = useState("");
-  const [age, setAge] = useState("");
   const [body, setBody] = useState("");
   const [captchaOk, setCaptchaOk] = useState(false);
 
@@ -727,9 +902,9 @@ function UseSheet({
     setCount(Math.min(12, Math.max(1, n || 1)));
   }
 
-  const notice: Notice = { title, age, body };
+  const notice: Notice = { title, body };
   const bytes = noticeBytes(notice);
-  const hasText = `${title}${age}${body}`.trim().length > 0;
+  const hasText = `${title}${body}`.trim().length > 0;
 
   async function make() {
     if (!phraseOk) {
@@ -857,16 +1032,12 @@ function UseSheet({
       </label>
       <p className="mt-3 text-sm">
         {es
-          ? "Un solo texto para todas las telas de este conjunto. Título, edad y cuerpo. Markdown permitido. Máximo 1kb."
-          : "One note for every cloth in this set. Title, age, and body. Markdown is allowed. 1kb at most."}
+          ? "Un solo texto para todas las telas de este conjunto. Título y cuerpo. Markdown permitido. Máximo 1kb."
+          : "One note for every cloth in this set. Title and body. Markdown is allowed. 1kb at most."}
       </p>
       <label className="mt-2 block">
         {es ? "Título" : "Title"}
         <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} />
-      </label>
-      <label className="mt-2 block">
-        {es ? "Edad" : "Age"}
-        <input className="field" value={age} onChange={(e) => setAge(e.target.value)} />
       </label>
       <label className="mt-2 block">
         {es ? "Cuerpo" : "Body"}
@@ -934,25 +1105,110 @@ function ScanSheet({
   onError: (message: string) => void;
   onClose: () => void;
 }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const grabRef = useRef<HTMLCanvasElement>(null);
+  const clothsRef = useRef(cloths);
   const recent = useRef<number[]>([]);
+  const stopScan = useRef(false);
+  clothsRef.current = cloths;
+  const [camError, setCamError] = useState("");
+  const [looking, setLooking] = useState(true);
+  const [note, setNote] = useState("");
+  const [hit, setHit] = useState("");
   const [found, setFound] = useState<Cloth | null>(null);
   const [code, setCode] = useState("");
   const [plain, setPlain] = useState<Notice | null>(null);
   const [gate, setGate] = useState(false);
   const [pending, setPending] = useState<File | null>(null);
 
-  async function read(file: File) {
-    const id = await readPattern(file);
-    if (!id) {
-      onError(es ? "Esta foto no es una tela de CamoKey." : "This photo is not a CamoKey cloth.");
-      setFound(null);
-      return;
-    }
-    const row = cloths.find((c) => c.id === id) ?? null;
+  function present(id: string) {
+    const row = clothsRef.current.find((c) => c.id === id) ?? null;
+    stopScan.current = true;
+    setHit(id);
     setFound(row);
     setPlain(null);
     setCode("");
-    if (!row) onError(es ? "La tela no está en este conjunto." : "This cloth is not in this set.");
+    setLooking(false);
+    setNote("");
+  }
+
+  function resume() {
+    setHit("");
+    setFound(null);
+    setPlain(null);
+    setCode("");
+    setLooking(true);
+    stopScan.current = false;
+  }
+
+  useEffect(() => {
+    let dead = false;
+    let busy = false;
+    const streamBox: { current: MediaStream | null } = { current: null };
+    async function loop() {
+      const video = videoRef.current;
+      const canvas = grabRef.current;
+      if (busy || !video || !canvas || video.readyState < 2 || stopScan.current) return;
+      busy = true;
+      try {
+        const w = 480;
+        const ratio = video.videoWidth ? video.videoHeight / video.videoWidth : 0.75;
+        canvas.width = w;
+        canvas.height = Math.max(64, Math.round(w * ratio));
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) return;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const id = readCanvas(canvas, false);
+        if (id && !dead) present(id);
+      } finally {
+        busy = false;
+      }
+    }
+    let timer = 0;
+    const tick = () => {
+      if (dead) return;
+      void loop();
+      timer = window.setTimeout(tick, 700);
+    };
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+        if (dead) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        streamBox.current = stream;
+        const video = videoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          await video.play();
+        }
+        timer = window.setTimeout(tick, 400);
+      } catch {
+        if (!dead) {
+          setCamError(es ? "La cámara no está disponible. Sube una foto." : "The camera is not available. Upload a picture.");
+          setLooking(false);
+        }
+      }
+    })();
+    return () => {
+      dead = true;
+      window.clearTimeout(timer);
+      streamBox.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, [es]);
+
+  async function read(file: File) {
+    const id = await readPattern(file);
+    if (!id) {
+      setNote(es ? "Esta foto no es una tela de CamoKey." : "This picture is not a CamoKey cloth.");
+      onError(es ? "Esta foto no es una tela de CamoKey." : "This picture is not a CamoKey cloth.");
+      return;
+    }
+    present(id);
   }
 
   async function onFile(file: File | undefined) {
@@ -969,34 +1225,124 @@ function ScanSheet({
   }
 
   async function tryOpen() {
-    if (!found || !found.sealed) return;
+    if (!found?.sealed) return;
     const notice = await openNotice(found.sealed, code);
     if (!notice) {
+      setNote(es ? "Esa clave no abre el texto." : "That key does not open the text.");
       onError(es ? "Esa clave no abre el texto." : "That key does not open the text.");
       return;
     }
+    setNote("");
     setPlain(notice);
   }
 
   const own = found && owner === found.owner && found.notice;
-  const shown = found?.visibility === "public" ? found.notice : own ? found?.notice : plain;
+  const shown = found?.visibility === "public" ? found.notice : own ? found.notice : plain;
+  const locked = Boolean(found && found.visibility !== "public" && !shown);
 
   return (
-    <Sheet title="Scan" onClose={onClose}>
-      <p>{es ? "Usa la cámara o una foto." : "Use the camera or a photo."}</p>
-      <label className="mt-3 block">
-        {es ? "Foto" : "Photo"}
-        <input
-          className="field"
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={(e) => void onFile(e.target.files?.[0])}
-        />
-      </label>
+    <div className="fixed inset-0 z-30 flex flex-col bg-[#c0c0c0]" style={{ paddingTop: "var(--grok-banner-h, 0px)" }}>
+      <div className="flex items-center justify-between bg-[#000080] px-2 py-1 text-white">
+        <h2 className="text-base font-bold">Scan</h2>
+        <button type="button" className="btn min-h-0 px-2 py-0 leading-none" onClick={onClose} aria-label="Close">
+          X
+        </button>
+      </div>
+      <div className="win-in relative m-2 min-h-0 flex-1 overflow-hidden bg-black">
+        <video ref={videoRef} className="h-full w-full object-cover" playsInline muted autoPlay />
+        <canvas ref={grabRef} className="hidden" />
+        {looking && !hit && (
+          <p className="pointer-events-none absolute inset-x-0 bottom-3 text-center text-sm text-white">
+            {es ? "Buscando un patrón…" : "Looking for a pattern…"}
+          </p>
+        )}
+        {camError && <p className="absolute inset-x-3 top-3 bg-[#c0c0c0] p-2 text-sm text-black">{camError}</p>}
+        {note && !hit && <p className="absolute inset-x-3 top-3 bg-[#c0c0c0] p-2 text-sm text-danger">{note}</p>}
+      </div>
+      <div className="taskbar flex justify-center p-2">
+        <label className="btn inline-flex cursor-pointer items-center gap-2">
+          <ImageUp className="size-4" aria-hidden="true" />
+          {es ? "Subir una foto" : "Upload a picture"}
+          <input className="sr-only" type="file" accept="image/*" onChange={(e) => void onFile(e.target.files?.[0])} />
+        </label>
+      </div>
+      {hit && (
+        <div className="absolute inset-0 grid place-items-center bg-black/40 p-6" style={{ paddingTop: "calc(1.5rem + var(--grok-banner-h, 0px))" }}>
+          <div
+            role="dialog"
+            aria-label={found ? found.name : "Pattern"}
+            className="flex max-h-full w-full max-w-md flex-col bg-[#c0c0c0] text-black shadow-[inset_-1px_-1px_0_#000,inset_1px_1px_0_#fff,inset_-2px_-2px_0_#808080,inset_2px_2px_0_#dfdfdf]"
+          >
+            <div className="flex items-center justify-between bg-[#000080] px-2 py-1 text-white">
+              <h2 className="truncate text-base font-bold">{found ? found.name : es ? "Patrón" : "Pattern"}</h2>
+              <button type="button" className="btn min-h-0 px-2 py-0 leading-none" onClick={resume} aria-label="Close">
+                X
+              </button>
+            </div>
+            <div className="min-h-0 overflow-auto p-3">
+              {found ? (
+                <>
+                  <dl className="win-in grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1 p-2 text-sm">
+                    <dt className="text-muted">{es ? "Tela" : "Cloth"}</dt>
+                    <dd>
+                      {found.name}-{found.index}
+                    </dd>
+                    <dt className="text-muted">{es ? "Permiso" : "Permission"}</dt>
+                    <dd className="inline-flex items-center gap-1">
+                      <VisIcon vis={found.visibility} />
+                      {found.visibility === "public" ? "Public" : found.visibility === "private" ? "Private" : "Unlisted"}
+                    </dd>
+                    <dt className="text-muted">{es ? "Creador" : "Maker"}</dt>
+                    <dd>{found.owner}</dd>
+                    <dt className="text-muted">{es ? "Patrón" : "Pattern"}</dt>
+                    <dd className="break-all font-mono text-xs">{found.id}</dd>
+                  </dl>
+                  {locked && (
+                    <label className="mt-3 block">
+                      {found.visibility === "private" ? (es ? "Contraseña" : "Password") : es ? "Enlace" : "Link"}
+                      <input
+                        className="field"
+                        type={found.visibility === "private" ? "password" : "text"}
+                        value={code}
+                        onChange={(e) => setCode(e.target.value)}
+                      />
+                    </label>
+                  )}
+                  {note && <p className="mt-2 text-sm text-danger">{note}</p>}
+                  {shown ? (
+                    <NoticeView notice={shown} />
+                  ) : found.visibility === "public" ? (
+                    <p className="mt-3 text-sm">{es ? "Este conjunto no tiene nota." : "This set has no note."}</p>
+                  ) : null}
+                  <div className="mt-3 flex justify-end gap-2">
+                    {locked && (
+                      <button type="button" className="btn-primary" onClick={() => void tryOpen()}>
+                        {es ? "Descifrar" : "Decrypt"}
+                      </button>
+                    )}
+                    <button type="button" className="btn" onClick={resume}>
+                      {es ? "Seguir" : "Keep scanning"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p>{es ? "Este patrón no está guardado en este navegador." : "This pattern is not saved in this browser."}</p>
+                  <p className="win-in mt-2 break-all p-2 font-mono text-xs">{hit}</p>
+                  <div className="mt-3 flex justify-end">
+                    <button type="button" className="btn" onClick={resume}>
+                      {es ? "Seguir" : "Keep scanning"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {gate && (
-        <div className="mt-3">
-          <p className="text-sm">{es ? "Dos fotos en un segundo. Completa la prueba." : "Two photos in one second. Finish the check."}</p>
+        <Sheet title={es ? "Demasiado rápido" : "Too fast"} onClose={() => setGate(false)}>
+          <p>{es ? "Dos fotos en un segundo. Completa la prueba." : "Two pictures in one second. Finish the check."}</p>
           <Captcha
             es={es}
             onPass={(ok) => {
@@ -1007,35 +1353,9 @@ function ScanSheet({
               void read(file);
             }}
           />
-        </div>
+        </Sheet>
       )}
-      {found && (
-        <div className="mt-3">
-          <p className="inline-flex items-center gap-2">
-            <VisIcon vis={found.visibility} />
-            {found.visibility === "public" ? "Public" : found.visibility === "private" ? "Private" : "Unlisted"} · {found.name}-
-            {found.index}
-          </p>
-          {found.visibility !== "public" && !shown && (
-            <label className="mt-2 block">
-              {found.visibility === "private" ? (es ? "Contraseña" : "Password") : es ? "Enlace" : "Link"}
-              <input className="field" type={found.visibility === "private" ? "password" : "text"} value={code} onChange={(e) => setCode(e.target.value)} />
-            </label>
-          )}
-          {shown && <NoticeView notice={shown} />}
-          {found.visibility !== "public" && !shown && (
-            <button type="button" className="btn-primary mt-3" onClick={() => void tryOpen()}>
-              {es ? "Descifrar" : "Decrypt"}
-            </button>
-          )}
-        </div>
-      )}
-      <div className="mt-4 flex justify-end">
-        <button type="button" className="btn-quiet" onClick={onClose}>
-          {es ? "Cerrar" : "Close"}
-        </button>
-      </div>
-    </Sheet>
+    </div>
   );
 }
 
@@ -1043,7 +1363,6 @@ function NoticeView({ notice }: { notice: Notice }) {
   return (
     <article className="win-in mt-3 p-2">
       <h3 className="font-bold">{notice.title || "Untitled"}</h3>
-      {notice.age && <p className="text-sm text-muted">{notice.age}</p>}
       <Markdown text={notice.body} />
     </article>
   );

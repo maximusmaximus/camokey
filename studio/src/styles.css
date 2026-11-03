@@ -110,6 +110,12 @@
       inset -2px -2px 0 #808080,
       inset 2px 2px 0 #dfdfdf;
   }
+  .app-topbar {
+    top: max(52px, calc(8px + var(--grok-banner-h, 0px)));
+  }
+  .sheet-frame {
+    padding-top: max(3.25rem, calc(0.5rem + var(--grok-banner-h, 0px)));
+  }
   .win-in {
     background: #fff;
     color: #000;
